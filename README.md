@@ -59,7 +59,7 @@ The game itself is not included.
 
 That's it.
 
-You do **not** need to install DOSBox Staging separately, edit the original GOG configuration files, or use Wine/Proton.
+You do **not** need to install DOSBox Staging separately or edit the original GOG configuration files.
 
 ---
 
