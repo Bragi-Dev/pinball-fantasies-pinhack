@@ -88,7 +88,7 @@ You do **not** need to install DOSBox Staging separately or edit the original GO
    After extraction, the folder should also contain:
 
    ```text
-   dosbox.exe
+   dosbox
    Pinball-Fantasies-Pinhack
    pinhack.conf
    ```
