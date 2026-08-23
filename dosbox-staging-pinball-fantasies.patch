@@ -1,0 +1,191 @@
+diff --git a/src/gui/render/render.cpp b/src/gui/render/render.cpp
+index 24707c42a..30a769afd 100644
+--- a/src/gui/render/render.cpp
++++ b/src/gui/render/render.cpp
+@@ -4,6 +4,8 @@
+ 
+ #include "dosbox.h"
+ 
++#include "pinhack.h"
++
+ #include <cassert>
+ #include <cmath>
+ #include <cstdlib>
+@@ -1413,6 +1415,15 @@ static void set_dedithering()
+ DosBox::Rect RENDER_CalcRestrictedViewportSizeInPixels(const DosBox::Rect& canvas_size_px)
+ {
+ 	const auto dpi_scale = GFX_GetDpiScaleFactor();
++	
++	if (pinhack_trigger) {
++        const auto restricted_canvas_size_px =
++                DosBox::Rect{4, 3}.ScaleSizeToFit(canvas_size_px);
++
++        return restricted_canvas_size_px.Copy()
++                .ScaleWidth(1.0f)
++                .ScaleHeight(1.0f);
++}
+ 
+ 	switch (render.viewport_settings.mode) {
+ 	case ViewportMode::Fit: {
+@@ -1549,7 +1560,10 @@ DosBox::Rect RENDER_CalcDrawRectInPixels(const DosBox::Rect& canvas_size_px,
+ 	};
+ 
+ 	auto draw_size_px = [&] {
+-		switch (render.integer_scaling_mode) {
++        	if (pinhack_trigger)
++                	return draw_size_fit_px;
++
++        	switch (render.integer_scaling_mode) {
+ 		case IntegerScalingMode::Off: return draw_size_fit_px;
+ 
+ 		case IntegerScalingMode::Auto: return handle_auto_mode();
+@@ -1801,7 +1815,12 @@ static void init_render_settings(SectionProp& section)
+ 	        "                       to emulate the horizontal and vertical stretch controls\n"
+ 	        "                       of CRT monitors.");
+ 
++	auto pinhack_prop = section.AddBool("pinhack", Always, false);
++	pinhack_prop->SetHelp(
++        	"Enable the Pinball Fantasies no-scroll display hack ('false' by default).");
++
+ 	string_prop = section.AddString("integer_scaling", Always, "auto");
++	
+ 	string_prop->SetValues({"auto", "vertical", "horizontal", "off"});
+ 	string_prop->SetHelp(
+ 	        "Constrain the horizontal or vertical scaling factor to the largest integer\n"
+@@ -2901,6 +2920,8 @@ void RENDER_Init()
+ 	set_viewport(*section);
+ 	set_integer_scaling(*section);
+ 
++	pinhack_enabled = section->GetBool("pinhack");	
++
+ 	set_monochrome_palette(*section);
+ 
+ 	update_color_space_setting();
+@@ -2967,6 +2988,11 @@ static void notify_render_setting_updated(SectionProp& section,
+ 		set_integer_scaling(section);
+ 		reinit_drawing();
+ 
++	} else if (prop_name == "pinhack") {
++        	pinhack_enabled = section.GetBool("pinhack");
++        	reinit_drawing();
++
++
+ 	} else if (prop_name == "monochrome_palette") {
+ 		set_monochrome_palette(section);
+ 		update_black_level_color_setting();
+diff --git a/src/hardware/video/vga_crtc.cpp b/src/hardware/video/vga_crtc.cpp
+index dd9500eb1..8454897d2 100644
+--- a/src/hardware/video/vga_crtc.cpp
++++ b/src/hardware/video/vga_crtc.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <cstdlib>
+ 
++#include "pinhack.h"
+ #include "vga.h"
+ 
+ #include "cpu/cpu.h"
+@@ -206,20 +207,23 @@ void vga_write_p3d5(io_port_t, io_val_t value, io_width_t)
+ 		// 5-6	Delay of cursor data in character clocks.
+ 		break;
+ 
+-	case 0x0c: // Start Address High Register
+-		vga.crtc.start_address_high = val;
+-		vga.config.display_start = (vga.config.display_start & 0xFF00FF) |
+-		                           (val << 8);
++	case 0x0c: { // Start Address High Register
++        	const auto effective_val = pinhack_trigger ? 0 : val;
+ 
+-		// 0-7  Upper 8 bits of the start address of the display buffer.
+-		break;
++        	vga.crtc.start_address_high = effective_val;
++        	vga.config.display_start = (vga.config.display_start & 0xFF00FF) |
++                                   (effective_val << 8);
++        	break;
++	}
+ 
+-	case 0x0d: // Start Address Low Register
+-		vga.crtc.start_address_low = val;
+-		vga.config.display_start = (vga.config.display_start & 0xFFFF00) | val;
++	case 0x0d: { // Start Address Low Register
++        	const auto effective_val = pinhack_trigger ? 0 : val;
+ 
+-		//0-7	Lower 8 bits of the start address of the display buffer.
+-		break;
++        	vga.crtc.start_address_low = effective_val;
++        	vga.config.display_start = (vga.config.display_start & 0xFFFF00) |
++                                   effective_val;
++        	break;
++	}
+ 
+ 	case 0x0e: // Cursor Location High Register
+ 		vga.crtc.cursor_location_high = val;
+diff --git a/src/hardware/video/vga_draw.cpp b/src/hardware/video/vga_draw.cpp
+index 16b8175f8..8247cbbee 100644
+--- a/src/hardware/video/vga_draw.cpp
++++ b/src/hardware/video/vga_draw.cpp
+@@ -4,6 +4,8 @@
+ 
+ #include "dosbox.h"
+ 
++#include "pinhack.h"
++
+ #include <algorithm>
+ #include <array>
+ #include <cmath>
+@@ -1240,9 +1242,11 @@ static void VGA_DrawSingleLine([[maybe_unused]] uint32_t dummy)
+ 	}
+ 
+ 	++vga.draw.lines_done;
+-	if (vga.draw.split_line == vga.draw.lines_done) {
+-		VGA_ProcessSplit();
++	if (!pinhack_trigger &&
++	    vga.draw.split_line == vga.draw.lines_done) {
++        	VGA_ProcessSplit();
+ 	}
++	
+ 
+ 	if (vga.draw.lines_done < vga.draw.lines_total) {
+ 		// Schedule drawing the next line if we're not at the last line
+@@ -1284,8 +1288,9 @@ static void VGA_DrawEGASingleLine([[maybe_unused]] uint32_t dummy)
+ 	}
+ 
+ 	++vga.draw.lines_done;
+-	if (vga.draw.split_line == vga.draw.lines_done) {
+-		VGA_ProcessSplit();
++	if (!pinhack_trigger &&
++    	   vga.draw.split_line == vga.draw.lines_done) {
++        	VGA_ProcessSplit();
+ 	}
+ 
+ 	if (vga.draw.lines_done < vga.draw.lines_total) {
+@@ -3194,7 +3199,15 @@ ImageInfo setup_drawing()
+ 
+ 	// Try to determine if this is a custom mode
+ 	video_mode.is_custom_mode = (CurMode->swidth != video_mode.width ||
+-	                             CurMode->sheight != video_mode.height);
++                             CurMode->sheight != video_mode.height);
++
++	if (pinhack_enabled && render_width == 320 &&
++    	    render_height >= 340 && render_height <= 360) {
++        	pinhack_trigger = true;
++        	render_height = 608;       	
++	} else {
++        	pinhack_trigger = false;
++	}
+ 
+ 	vga.draw.vblank_skip = vblank_skip;
+ 
+diff --git a/src/pinhack.h b/src/pinhack.h
+new file mode 100644
+index 000000000..c698cfda3
+--- /dev/null
++++ b/src/pinhack.h
+@@ -0,0 +1,7 @@
++#ifndef DOSBOX_PINHACK_H
++#define DOSBOX_PINHACK_H
++
++inline bool pinhack_enabled = false;
++inline bool pinhack_trigger = false;
++
++#endif
