@@ -89,14 +89,14 @@ You do **not** need to install DOSBox Staging separately or edit the original GO
 
    ```text
    dosbox.exe
-   Pinball-Fantasies-Pinhack.bat
+   Pinball-Fantasies-Pinhack
    pinhack.conf
    ```
 
 4. Run:
 
    ```text
-   Pinball-Fantasies-Pinhack.bat
+   Pinball-Fantasies-Pinhack
    ```
 
 If your file manager does not allow the launcher to run, make sure it is marked as executable.
